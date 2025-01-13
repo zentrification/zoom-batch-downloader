@@ -153,7 +153,7 @@ def download_with_progress(url, output_path, expected_size, verbose_output, size
 		try:
 			download_speed = 1.1  # simulate slow download speed
 			time_out = expected_size / download_speed 		
-			socket.setdefaulttimeout(time_out)
+			# socket.setdefaulttimeout(time_out)
 			urllib.request.urlretrieve(url, filename=output_path, reporthook=t.update_to)
 			file_size = os.path.getsize(output_path)
 			if abs(file_size - expected_size) > size_tolerance:
