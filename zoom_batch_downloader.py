@@ -277,8 +277,12 @@ def download_recordings_from_meetings(meetings, host_folder):
                 recording_file.get("file_extension")
                 or os.path.splitext(recording_file["file_name"])[1]
             )
+
+            # recording file name format
+            # {start_time}__{meeting_id}__{topic}
+            recording_start = datetime.datetime.strptime(recording_file["recording_start"], "%Y-%m-%dT%H:%M:%SZ")
             recording_name = utils.slugify(
-                f'{topic}__{recording_file["recording_start"]}'
+                f'{recording_start.strftime("%Y-%m-%d_%H-%M")}__{meeting["id"]}__{topic}'
             )
             file_id = recording_file["id"]
             file_name_suffix = (
@@ -300,8 +304,9 @@ def download_recordings_from_meetings(meetings, host_folder):
             )
             file_size = int(recording_file["file_size"])
 
+            # added meeting time
             if download_recording_file(
-                url, host_folder, file_name, file_size, topic, recording_name
+                url, host_folder, file_name, file_size, topic, recording_name, recording_start
             ):
                 total_size += file_size
                 file_count += 1
@@ -312,13 +317,14 @@ def download_recordings_from_meetings(meetings, host_folder):
 
 
 def download_recording_file(
-    download_url, host_folder, file_name, file_size, topic, recording_name
+    download_url, host_folder, file_name, file_size, topic, recording_name, recording_start
 ):
     if CONFIG.VERBOSE_OUTPUT:
         print()
         utils.print_dim(f"URL: {download_url}")
 
-    file_path = create_path(host_folder, file_name, topic, recording_name)
+    # added meeting time
+    file_path = create_path(host_folder, file_name, topic, recording_name, recording_start)
 
     if (
         os.path.exists(file_path)
@@ -335,7 +341,10 @@ def download_recording_file(
     utils.wait_for_disk_space(
         file_size, CONFIG.OUTPUT_PATH, CONFIG.MINIMUM_FREE_DISK, interval=5
     )
-    tmp_file_path = file_path + ".tmp"
+
+    # s3-mountpoint does not support renaming files/folders
+    #tmp_file_path = file_path + ".tmp"
+    tmp_file_path = file_path
 
     if download_with_retry(
         download_url,
@@ -344,12 +353,12 @@ def download_recording_file(
         CONFIG.VERBOSE_OUTPUT,
         CONFIG.FILE_SIZE_MISMATCH_TOLERANCE,
     ):
-        os.rename(tmp_file_path, file_path)
+        #os.rename(tmp_file_path, file_path)
         return True
     else:
         return False
 
-    os.rename(tmp_file_path, file_path)
+    #os.rename(tmp_file_path, file_path)
 
     return True
 
@@ -385,13 +394,18 @@ def download_with_retry(
     return False
 
 
-def create_path(host_folder, file_name, topic, recording_name):
+def create_path(host_folder, file_name, topic, recording_name, recording_start):
     folder_path = host_folder
 
     if CONFIG.GROUP_BY_TOPIC:
         folder_path = os.path.join(folder_path, topic)
     if CONFIG.GROUP_BY_RECORDING:
         folder_path = os.path.join(folder_path, recording_name)
+
+    # group recordings into folders by month
+    month = recording_start.strftime("%Y-%m")
+
+    folder_path = os.path.join(folder_path, month, recording_name)
 
     os.makedirs(folder_path, exist_ok=True)
 
