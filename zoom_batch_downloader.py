@@ -1,6 +1,8 @@
 import datetime
+import importlib
 import math
 import os
+import sys
 import traceback
 from calendar import monthrange
 from types import ModuleType
@@ -25,14 +27,28 @@ except ImportError:
         "Missing config file, copy config_template.py to config.py and change as needed."
     )
 
-client = zoom_client(
-    account_id=CONFIG.ACCOUNT_ID,
-    client_id=CONFIG.CLIENT_ID,
-    client_secret=CONFIG.CLIENT_SECRET,
-)
+try:
+    client_name = sys.argv[1] if len(sys.argv) > 1 else "not_found"
+    CLIENT_CONFIG = importlib.import_module(f"client_config.{client_name}")
+    #print("Loaded CLIENT_CONFIG: ", CLIENT_CONFIG.OUTPUT_PATH)
+    #print("Loaded CLIENT_CONFIG: ", CLIENT_CONFIG.USERS)
+
+    client = zoom_client(
+        account_id=CONFIG.ACCOUNT_ID,
+        client_id=CONFIG.CLIENT_ID,
+        client_secret=CONFIG.CLIENT_SECRET,
+    )
+except ModuleNotFoundError:
+    print("No client_config/ file specified as CLI argument")
+    path = os.path.join(os.path.dirname(__file__), 'client_config')
+    files = [f[:-3] for f in os.listdir(path)
+             if f.endswith('.py') and f != '__init__.py']
+    files.sort()
+    print("Available client_configs: ", ", ".join(files))
+    sys.exit(1)
 
 # Connect to the SQLite database (or create it if it doesn't exist)
-conn = sqlite3.connect("meetings.db")
+conn = sqlite3.connect(f"db/{client_name}.db")
 
 # Create a cursor object to execute SQL queries
 cursor = conn.cursor()
@@ -51,7 +67,7 @@ def main():
     if NOT_READY_FILES_ONLY:
         download_not_ready_files()
     else:
-        CONFIG.OUTPUT_PATH = utils.prepend_path_on_windows(CONFIG.OUTPUT_PATH)
+        CLIENT_CONFIG.OUTPUT_PATH = utils.prepend_path_on_windows(CLIENT_CONFIG.OUTPUT_PATH)
 
         print_filter_warnings()
 
@@ -83,8 +99,8 @@ def print_filter_warnings():
     if CONFIG.TOPICS:
         utils.print_bright(f"Topics filter is active {CONFIG.TOPICS}")
         did_print = True
-    if CONFIG.USERS:
-        utils.print_bright(f"Users filter is active {CONFIG.USERS}")
+    if CLIENT_CONFIG.USERS:
+        utils.print_bright(f"Users filter is active {CLIENT_CONFIG.USERS}")
         did_print = True
     if CONFIG.RECORDING_FILE_TYPES:
         utils.print_bright(
@@ -97,8 +113,8 @@ def print_filter_warnings():
 
 
 def get_users():
-    if CONFIG.USERS:
-        return [(email, "") for email in CONFIG.USERS]
+    if CLIENT_CONFIG.USERS:
+        return [(email, "") for email in CLIENT_CONFIG.USERS]
 
     utils.print_bright("Scanning for users:")
     active_users_url = "https://api.zoom.us/v2/users?status=active"
@@ -159,7 +175,7 @@ def download_recordings(users, from_date, to_date):
 
 
 def download_not_ready_files():
-    conn = sqlite3.connect("meetings.db")
+    conn = sqlite3.connect(f"db/{client_name}.db")
 
     cursor = conn.cursor()
 
@@ -178,9 +194,9 @@ def get_user_description(user_email, user_name):
 
 def get_user_host_folder(user_email):
     if CONFIG.GROUP_BY_USER:
-        return os.path.join(CONFIG.OUTPUT_PATH, user_email)
+        return os.path.join(CLIENT_CONFIG.OUTPUT_PATH, user_email)
     else:
-        return CONFIG.OUTPUT_PATH
+        return CLIENT_CONFIG.OUTPUT_PATH
 
 
 def date_to_str(date):
@@ -218,7 +234,7 @@ def get_meeting_uuids(user_email, start_date, end_date):
 
 def get_meetings(meeting_uuids):
     meetings = []
-    conn = sqlite3.connect("meetings.db")
+    conn = sqlite3.connect(f"db/{client_name}.db")
 
     if meeting_uuids:
         utils.print_bright("Scanning for recordings:")
@@ -339,7 +355,7 @@ def download_recording_file(
 
     utils.print_bright(f"Downloading: {file_name}")
     utils.wait_for_disk_space(
-        file_size, CONFIG.OUTPUT_PATH, CONFIG.MINIMUM_FREE_DISK, interval=5
+        file_size, CLIENT_CONFIG.OUTPUT_PATH, CONFIG.MINIMUM_FREE_DISK, interval=5
     )
 
     # s3-mountpoint does not support renaming files/folders
@@ -402,10 +418,14 @@ def create_path(host_folder, file_name, topic, recording_name, recording_start):
     if CONFIG.GROUP_BY_RECORDING:
         folder_path = os.path.join(folder_path, recording_name)
 
-    # group recordings into folders by month
+    # group recordings into folders by month by default
     month = recording_start.strftime("%Y-%m")
+    day = recording_start.strftime("%Y-%m-%d")
 
-    folder_path = os.path.join(folder_path, month, recording_name)
+    if CLIENT_CONFIG.GROUP_BY_DAY:
+        folder_path = os.path.join(folder_path, month, day, recording_name)
+    else:
+        folder_path = os.path.join(folder_path, month, recording_name)
 
     os.makedirs(folder_path, exist_ok=True)
 
